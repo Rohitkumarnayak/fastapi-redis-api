@@ -39,4 +39,4 @@ app.include_router(cache.router, prefix="/api/v1")
 
 @app.get("/", tags=["root"])
 async def root():
-    return {"message": "REG-EYE API is running", "docs": "/docs", "health": "/api/v1/health", "readiness": "/api/v1/health/ready"}
+    return {"message": "SMART API is running", "docs": "/docs", "health": "/api/v1/health", "readiness": "/api/v1/health/ready"}
