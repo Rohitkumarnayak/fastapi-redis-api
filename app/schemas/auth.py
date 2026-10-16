@@ -1,20 +1,20 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    identifier: str = Field(min_length=1, max_length=255, description="Username or email")
     password: str = Field(min_length=1, max_length=200)
 
 
 class UserResponse(BaseModel):
     id: int
     name: str
+    username: str
     email: str
     role: str
     is_active: bool
-
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginResponse(BaseModel):
@@ -31,12 +31,9 @@ class SessionResponse(BaseModel):
     expires_at: datetime
 
 
-
-from pydantic import BaseModel, EmailStr, Field
-
-
 class RegisterRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
+    name: str = Field(min_length=2, max_length=120)
+    username: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z0-9_.-]+$")
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
     role: str = "operator"
@@ -45,6 +42,9 @@ class RegisterRequest(BaseModel):
 class RegisterResponse(BaseModel):
     id: int
     name: str
+    username: str
     email: str
     role: str
     is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)

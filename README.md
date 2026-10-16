@@ -1,101 +1,108 @@
-# FastAPI + Uvicorn + Redis API starter
+# FastAPI Backend
 
-Backend-only starter project. No frontend is included.
+FastAPI backend for event monitoring, user/session management, devices, plant zones, ROI polygons, dashboard analytics, pagination and CSV reports. PostgreSQL/Neon is the durable source of truth; Redis Pub/Sub is best-effort live notification only.
 
-## Included
-- FastAPI application with lifespan-managed async Redis client
-- Uvicorn ASGI server
-- `/api/v1/health` and `/api/v1/health/ready`
-- Redis cache routes
-- Event publish route using Redis Pub/Sub
-- WebSocket starter route
-- Environment configuration and Docker Compose
+## Before deployment to an existing Neon database
 
-## Important WebSocket note
-The starter WebSocket endpoint runs concurrent sender/receiver tasks and forwards Redis Pub/Sub notifications. Add authentication and authorization before exposing it. Handle task cancellation, reconnects, backpressure, and per-user camera filtering carefully as the project grows.
+1. Create a Neon branch or backup.
+2. Run `migrations/001_expand_schema.sql` in the Neon SQL Editor. It adds `users.username`, event workflow/location fields, and the `devices`, `zones`, and `rois` tables. Existing user/event/session rows are retained. If `events.assigned_to` was an integer, its existing values are converted to text IDs; the migration cannot guess contact names or phone numbers.
+3. Set environment variables in your deployment provider. Never copy `.env` into the deployment artifact or commit secrets.
+4. Deploy the code and restart the service.
+5. If your database has a different schema from the supplied app, inspect it and adapt the migration before execution.
 
-Redis Pub/Sub is transient and at-most-once. It is appropriate for best-effort notifications, not as the only storage for safety-critical events. Persist authoritative events in SQL Server and/or use a durable queue/stream for reliable processing.
+In production, this app does not run `create_all()` at startup. In `development` or `test`, it creates missing tables for local convenience. `create_all()` does not migrate existing tables.
 
-## 1. Create environment
-Copy `.env.example` to `.env`.
+## Configuration
 
-Windows PowerShell:
-```powershell
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+Set `DATABASE_URL` to a Neon SQLAlchemy URL, e.g. `postgresql+psycopg://USER:PASSWORD@HOST/DBNAME?sslmode=require`, and `REDIS_URL` to a reachable Redis instance. Also set `SESSION_HOURS`, `CORS_ORIGINS`, and bootstrap admin environment variables as needed. Keep Redis private and use TLS/auth where available.
 
-Linux/macOS:
+Install and run:
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## 2. Start Redis
-With Docker Compose:
-```bash
-docker compose up -d redis
+Swagger UI: `/docs`; OpenAPI: `/openapi.json`.
+
+## API overview (`/api/v1`)
+
+### Authentication
+- `POST /auth/login` — `identifier` accepts username or email plus password.
+- `POST /auth/register` — administrator-only registration; checks username and email uniqueness.
+- `GET /auth/session`, `POST /auth/logout`.
+
+### Users (administrator-only unless noted)
+- `GET /users` — filters `q`, `role`, `is_active`; pagination `page`, `page_size`.
+- `POST /users`, `GET /users/{id}`, `PATCH /users/{id}`, `DELETE /users/{id}` (soft-deactivates and revokes sessions).
+- `GET /users/me` — current profile.
+
+### Events (bearer token required)
+- `POST /events` — persist an event with optional severity/status/assignment/location.
+- `GET /events` — filters `event_type`, `severity`, `status`, `camera_id`, `assigned_to`, `zone_id`, `start_date`, `end_date`; `page`, `page_size` (max 500), `sort_by`, `sort_order`.
+- `GET /events/{id}`, `PATCH /events/{id}`.
+- `PATCH /events/{id}/assign` — writes `assigned_to`, `assigned_by`, `assigned_at`.
+- `PATCH /events/{id}/acknowledge` — writes acknowledgment user/time.
+- `PATCH /events/{id}/resolve` — writes resolution user/time/notes.
+- `PATCH /events/{id}/close` — closes a resolved event.
+- `DELETE /events/{id}` — administrator-only.
+- `WS /events/ws` — Redis live event stream. Add gateway/token authentication and camera authorization before exposing WebSockets publicly.
+
+### Dashboard and reports
+- `GET /dashboard` — date-filtered totals, severity/status breakdowns, top event types/cameras.
+- `GET /dashboard/timeline?days=7` — daily event counts.
+- `GET /dashboard/zones` — zone map summaries (zone membership is inferred through ROI `device_id` matching `events.camera_id`).
+- `GET /reports/summary?start_date=...&end_date=...` — report aggregates.
+- `GET /reports/events.csv` — downloadable CSV with optional date/severity/status/camera filters.
+
+### Devices
+- `POST /devices` — administrator registration.
+- `GET /devices` — paginated device listing with search/status/enabled filters.
+- `GET /devices/{device_id}`, `PATCH /devices/{device_id}`, `DELETE /devices/{device_id}` (soft disable).
+- `POST /devices/{device_id}/heartbeat` — marks a registered device active and updates `last_seen_at`.
+
+### Zones and ROIs
+- `POST /zones`, `GET /zones`, `GET /zones/{id}`, `PATCH /zones/{id}`, `DELETE /zones/{id}`.
+- `POST /rois`, `GET /rois?zone_id=&device_id=&enabled=`, `PATCH /rois/{id}`, `DELETE /rois/{id}`.
+- `GET /analytics/zones/summary` — event counts grouped by zone.
+
+Zone `boundary` is GeoJSON or a client-defined list of coordinates. ROI `points` stores polygon points; `coordinate_space` is `normalized`, `pixel`, or `geographic`. Normalized ROI coordinates should use a documented convention consistently (commonly 0..1). For map overlays, geographic coordinates should be GeoJSON `[longitude, latitude]`.
+
+## Example requests
+
+Login:
+
+```json
+{"identifier":"admin@example.com","password":"replace-me"}
 ```
 
-Or install/run Redis separately and update `REDIS_URL` in `.env`.
+Create event:
 
-## 3. Run API locally
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```json
+{
+  "event_type":"PPE_VIOLATION",
+  "camera_id":"CAM-001",
+  "message":"Helmet not detected",
+  "severity":"critical",
+  "latitude":21.468,
+  "longitude":83.981
+}
 ```
 
-Open:
-- Swagger: http://127.0.0.1:8000/docs
-- Health: http://127.0.0.1:8000/api/v1/health
-- Readiness: http://127.0.0.1:8000/api/v1/health/ready
+Assign an event (the assignee is an arbitrary string, not necessarily an application user):
 
-Do not use `--reload` in production.
-
-## 4. Try the cache API
-```bash
-curl -X PUT http://127.0.0.1:8000/api/v1/cache/demo ^
-  -H "Content-Type: application/json" ^
-  -d "{\"value\":\"hello\",\"ttl_seconds\":60}"
-
-curl http://127.0.0.1:8000/api/v1/cache/demo
-curl -X DELETE http://127.0.0.1:8000/api/v1/cache/demo
+```json
+{"assigned_to":"Rajesh Kumar, Phone: +919876543210"}
 ```
 
-PowerShell may require `curl.exe` or `Invoke-RestMethod`.
+All protected routes require `Authorization: Bearer <access_token>`. Roles currently recognized: `admin`, `operator`, `viewer`; user/device/zone/ROI administration and event deletion are admin-only. If your operational policy differs, adjust route dependencies before deployment.
 
-## 5. Publish an event
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/events ^
-  -H "Content-Type: application/json" ^
-  -d "{\"event_type\":\"PPE_VIOLATION\",\"camera_id\":\"CAM-001\",\"message\":\"Helmet not detected\",\"severity\":\"warning\"}"
-```
+## Production notes
 
-## API routes
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/` | Root information |
-| GET | `/api/v1/health` | Liveness check |
-| GET | `/api/v1/health/ready` | Redis readiness check |
-| PUT | `/api/v1/cache/{key}` | Write a cache value with TTL |
-| GET | `/api/v1/cache/{key}` | Read a cache value |
-| DELETE | `/api/v1/cache/{key}` | Delete a cache value |
-| POST | `/api/v1/events` | Publish an event to Redis Pub/Sub |
-| WS | `/api/v1/events/ws` | Minimal WebSocket starter |
-
-## Suggested next additions
-1. SQL Server repository and connection pooling
-2. JWT authentication and role/plant/camera-level authorization
-3. Production WebSocket sender/receiver task management
-4. Durable event queue, retry policy and idempotency
-5. Structured logs, metrics, tracing and rate limiting
-6. Automated tests and load tests
-
-## Production cautions
-- Keep `.env` and secrets out of source control.
-- Do not expose Redis publicly; use private networking and authentication/TLS as appropriate.
-- Restrict CORS origins to trusted origins when a browser frontend is added.
-- Add authentication and authorization before deploying non-public routes.
-- Do not put video frames or large files in Redis; store media in the VMS/media service or object storage.
-- Scale Uvicorn workers only after benchmarking. Each worker is a separate process and creates its own Redis connection pool.
+- The event WebSocket route is a starter implementation and currently accepts connections without token validation. Protect it before production exposure.
+- Event Pub/Sub is best-effort; event rows are committed to PostgreSQL first.
+- `assigned_to` is a single free-text field by design. For reliable structured reporting on contact name/phone, separate columns would be better, but this implementation preserves the requested one-field model.
+- Add rate limiting, audit logs, backup/restore testing, and automated integration tests against a non-production Neon branch before production rollout.

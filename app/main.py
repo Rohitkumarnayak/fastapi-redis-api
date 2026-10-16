@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
-from app.api.routes import auth, cache, dashboard, events, health
+from app.api.routes import auth, cache, dashboard, events, health, users, devices, zones, reports
 from app.core.config import settings
 from app.database.connection import Base, engine
 from app.models import Event, LoginSession, User  # noqa: F401 - register ORM models
@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Simple starter behavior: create missing tables at startup. Use Alembic migrations for production schema changes.
-    Base.metadata.create_all(bind=engine)
+    # Production schema changes are applied explicitly with migrations; do not mutate Neon schema on startup.
+    if settings.environment.lower() in {"development", "test"}:
+        Base.metadata.create_all(bind=engine)
     redis_client = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=True, socket_connect_timeout=3, socket_timeout=3, health_check_interval=30)
     app.state.redis = redis_client
     try:
@@ -35,6 +36,10 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
 app.include_router(events.router, prefix="/api/v1")
+app.include_router(users.router, prefix="/api/v1")
+app.include_router(devices.router, prefix="/api/v1")
+app.include_router(zones.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
 app.include_router(cache.router, prefix="/api/v1")
 
 @app.get("/", tags=["root"])

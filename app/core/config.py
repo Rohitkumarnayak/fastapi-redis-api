@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "SMART API"
+    app_name: str = "API Service"
     environment: str = "development"
     log_level: str = "INFO"
     database_url: str = ""

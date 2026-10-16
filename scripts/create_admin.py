@@ -17,7 +17,10 @@ def main():
         existing = db.scalar(select(User).where(User.email == email))
         if existing:
             raise SystemExit("A user with this email already exists; no changes made.")
-        user = User(name=settings.bootstrap_admin_name, email=email, password_hash=hash_password(settings.bootstrap_admin_password), role="admin", is_active=True)
+        username = email.split("@", 1)[0].lower().strip()
+        if db.scalar(select(User).where(User.username == username)):
+            username = f"admin_{email.split(chr(64), 1)[0][:35]}"
+        user = User(name=settings.bootstrap_admin_name, username=username, email=email, password_hash=hash_password(settings.bootstrap_admin_password), role="admin", is_active=True)
         db.add(user)
         db.commit()
         print(f"Created admin user: {email}")
