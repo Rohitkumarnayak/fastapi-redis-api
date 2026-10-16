@@ -14,7 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database.connection import Base
 
 
-def utcnow():
+def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -65,7 +65,8 @@ class Event(Base):
     )
 
     # Assignment details
-    # Can contain name, phone number, or other contact details.
+    # Can contain an external person's name, phone number,
+    # or other contact details.
     assigned_to: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -116,6 +117,19 @@ class Event(Base):
 
     longitude: Mapped[float | None] = mapped_column(
         Float,
+        nullable=True,
+    )
+
+    # Event image
+    # Stores the raw Base64 string, without a data URL prefix.
+    image_base64: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Examples: image/jpeg, image/png, image/webp
+    image_mime_type: Mapped[str | None] = mapped_column(
+        String(100),
         nullable=True,
     )
 
