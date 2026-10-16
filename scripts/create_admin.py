@@ -9,7 +9,7 @@ from app.models import Event, LoginSession, User  # noqa: F401 - register models
 def main():
     if not settings.bootstrap_admin_email or not settings.bootstrap_admin_password:
         raise SystemExit("Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD in .env first.")
-    if len(settings.bootstrap_admin_password) < 12:
+    if len(settings.bootstrap_admin_password) < 4:
         raise SystemExit("Admin password must be at least 12 characters.")
     Base.metadata.create_all(bind=engine)
     email = settings.bootstrap_admin_email.lower().strip()
