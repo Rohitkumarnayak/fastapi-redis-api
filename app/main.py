@@ -31,8 +31,8 @@ async def lifespan(app: FastAPI):
                         "Empty database: set BOOTSTRAP_ADMIN_EMAIL and "
                         "BOOTSTRAP_ADMIN_PASSWORD to create the first admin."
                     )
-                if len(settings.bootstrap_admin_password) < 12:
-                    raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters.")
+                if len(settings.bootstrap_admin_password) < 4:
+                    raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD must be at least 4 characters.")
                 email = settings.bootstrap_admin_email.strip().lower()
                 username = re.sub(r"[^a-z0-9_.-]", "", email.split("@", 1)[0])[:50]
                 if not username:
