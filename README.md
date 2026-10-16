@@ -2,19 +2,22 @@
 
 FastAPI backend for event monitoring, user/session management, devices, plant zones, ROI polygons, dashboard analytics, pagination and CSV reports. PostgreSQL/Neon is the durable source of truth; Redis Pub/Sub is best-effort live notification only.
 
-## Before deployment to an existing Neon database
+## First deployment to a new/empty Neon database
 
-1. Create a Neon branch or backup.
-2. Run `migrations/001_expand_schema.sql` in the Neon SQL Editor. It adds `users.username`, event workflow/location fields, and the `devices`, `zones`, and `rois` tables. Existing user/event/session rows are retained. If `events.assigned_to` was an integer, its existing values are converted to text IDs; the migration cannot guess contact names or phone numbers.
-3. Set environment variables in your deployment provider. Never copy `.env` into the deployment artifact or commit secrets.
-4. Deploy the code and restart the service.
-5. If your database has a different schema from the supplied app, inspect it and adapt the migration before execution.
+1. Create a Neon PostgreSQL database and copy its connection string.
+2. Set `DATABASE_URL` in Render to a SQLAlchemy Psycopg URL, for example `postgresql+psycopg://USER:PASSWORD@HOST/DBNAME?sslmode=require`.
+3. Set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (at least 12 characters), and optionally `BOOTSTRAP_ADMIN_NAME` in Render environment variables. Use a strong unique password.
+4. For the first deployment only, set `AUTO_CREATE_SCHEMA=true` in Render. The service creates tables on the empty database and creates the initial admin using the bootstrap variables.
+5. Deploy and wait for a successful startup. Test `GET /api/v1/health/ready`, then open `/docs` and log in with the configured bootstrap email or username (the email prefix).
+6. After successful initialization, set `AUTO_CREATE_SCHEMA=false` and redeploy. Keep the bootstrap credentials private; rotate the initial password after login.
 
-In production, this app does not run `create_all()` at startup. In `development` or `test`, it creates missing tables for local convenience. `create_all()` does not migrate existing tables.
+`AUTO_CREATE_SCHEMA` is intended for initializing a new/empty database. SQLAlchemy `create_all()` does not migrate existing tables. For an existing database, back it up and use a reviewed migration instead. `scripts/create_admin.py` is also available for manual one-time setup.
+
+Redis is optional for login and ordinary database-backed API endpoints. If Redis is unavailable, live event notifications and cache endpoints are unavailable, but login should continue to work if PostgreSQL is configured correctly.
 
 ## Configuration
 
-Set `DATABASE_URL` to a Neon SQLAlchemy URL, e.g. `postgresql+psycopg://USER:PASSWORD@HOST/DBNAME?sslmode=require`, and `REDIS_URL` to a reachable Redis instance. Also set `SESSION_HOURS`, `CORS_ORIGINS`, and bootstrap admin environment variables as needed. Keep Redis private and use TLS/auth where available.
+Set `DATABASE_URL` to a Neon SQLAlchemy URL, e.g. `postgresql+psycopg://USER:PASSWORD@HOST/DBNAME?sslmode=require`, `AUTO_CREATE_SCHEMA` (true only for empty-DB initialization), and `REDIS_URL` to a reachable Redis instance. Also set `SESSION_HOURS`, `CORS_ORIGINS`, and bootstrap admin environment variables as needed. Keep Redis private and use TLS/auth where available.
 
 Install and run:
 
@@ -28,10 +31,30 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Swagger UI: `/docs`; OpenAPI: `/openapi.json`.
 
+
+
+## Login behavior
+
+`POST /api/v1/auth/login` accepts:
+
+```json
+{"identifier": "admin@example.com", "password": "your-password"}
+```
+
+or
+
+```json
+{"identifier": "admin", "password": "your-password"}
+```
+
+The backend automatically treats an identifier containing `@` as an email and searches `users.email`. Otherwise, it searches `users.username`. The older browser payloads `{"email":"...","password":"..."}` and `{"username":"...","password":"..."}` are also accepted. The configured initial administrator username is the sanitized part of the bootstrap email before `@`.
+
+A successful response contains `access_token`; send it on protected requests as `Authorization: Bearer <access_token>`.
+
 ## API overview (`/api/v1`)
 
 ### Authentication
-- `POST /auth/login` — `identifier` accepts username or email plus password.
+- `POST /auth/login` — send `identifier` with username or email plus password. For compatibility, `email` and `username` request fields are also accepted. The backend treats a value containing `@` as email and looks up `users.email`; otherwise it looks up `users.username`.
 - `POST /auth/register` — administrator-only registration; checks username and email uniqueness.
 - `GET /auth/session`, `POST /auth/logout`.
 
@@ -76,7 +99,7 @@ Zone `boundary` is GeoJSON or a client-defined list of coordinates. ROI `points`
 Login:
 
 ```json
-{"identifier":"admin@example.com","password":"replace-me"}
+{"identifier":"admin@example.com","password":"use-your-bootstrap-password"}
 ```
 
 Create event:

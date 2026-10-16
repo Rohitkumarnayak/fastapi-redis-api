@@ -19,11 +19,16 @@ async def readiness(request: Request):
         dependencies["postgresql"] = "ok"
     except SQLAlchemyError:
         dependencies["postgresql"] = "unavailable"
-    try:
-        await request.app.state.redis.ping()
-        dependencies["redis"] = "ok"
-    except RedisError:
-        dependencies["redis"] = "unavailable"
-    if any(value != "ok" for value in dependencies.values()):
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        dependencies["redis"] = "disabled"
+    else:
+        try:
+            await redis_client.ping()
+            dependencies["redis"] = "ok"
+        except RedisError:
+            dependencies["redis"] = "unavailable"
+    # PostgreSQL is required for core APIs. Redis is optional for live events/cache.
+    if dependencies.get("postgresql") != "ok":
         raise HTTPException(status_code=503, detail={"status": "not_ready", "dependencies": dependencies})
     return {"status": "ready", "dependencies": dependencies}

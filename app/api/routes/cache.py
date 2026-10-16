@@ -14,8 +14,11 @@ class CacheWrite(BaseModel):
 async def set_cache(key: str, payload: CacheWrite, request: Request):
     if len(key) > 200:
         raise HTTPException(status_code=400, detail="Key must be 200 characters or fewer")
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail="Cache service unavailable")
     try:
-        await request.app.state.redis.set(
+        await redis_client.set(
             f"starter:{key}", payload.value, ex=payload.ttl_seconds
         )
         return {"key": key, "stored": True, "ttl_seconds": payload.ttl_seconds}
@@ -25,8 +28,11 @@ async def set_cache(key: str, payload: CacheWrite, request: Request):
 
 @router.get("/{key}")
 async def get_cache(key: str, request: Request):
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail="Cache service unavailable")
     try:
-        value = await request.app.state.redis.get(f"starter:{key}")
+        value = await redis_client.get(f"starter:{key}")
         if value is None:
             raise HTTPException(status_code=404, detail="Cache key not found")
         return {"key": key, "value": value}
@@ -36,8 +42,11 @@ async def get_cache(key: str, request: Request):
 
 @router.delete("/{key}", status_code=204)
 async def delete_cache(key: str, request: Request):
+    redis_client = getattr(request.app.state, "redis", None)
+    if redis_client is None:
+        raise HTTPException(status_code=503, detail="Cache service unavailable")
     try:
-        await request.app.state.redis.delete(f"starter:{key}")
+        await redis_client.delete(f"starter:{key}")
         return Response(status_code=204)
     except RedisError:
         raise HTTPException(status_code=503, detail="Cache service unavailable")

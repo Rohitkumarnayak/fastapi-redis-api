@@ -48,8 +48,13 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    identifier = payload.identifier.strip().lower()
-    user = db.scalar(select(User).where(or_(User.email == identifier, User.username == identifier)))
+    # Automatically choose the lookup column based on the identifier:
+    # values containing "@" are treated as email addresses; otherwise username.
+    identifier = payload.login_identifier.strip().lower()
+    if "@" in identifier:
+        user = db.scalar(select(User).where(User.email == identifier))
+    else:
+        user = db.scalar(select(User).where(User.username == identifier))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username/email or password", headers={"WWW-Authenticate": "Bearer"})
     if not user.is_active:

@@ -16,9 +16,12 @@ EVENT_CHANNEL = "events:live"
 
 def publish_event(request: Request, event: Event):
     try:
+        redis_client = getattr(request.app.state, "redis", None)
+        if redis_client is None:
+            return
         import anyio
         data = EventResponse.model_validate(event).model_dump(mode="json")
-        anyio.from_thread.run(request.app.state.redis.publish, EVENT_CHANNEL, json.dumps(data))
+        anyio.from_thread.run(redis_client.publish, EVENT_CHANNEL, json.dumps(data))
     except Exception:
         # PostgreSQL remains the durable source of truth; Pub/Sub is best-effort.
         pass
@@ -153,8 +156,11 @@ def delete_event(event_id: int, db: Session = Depends(get_db), user: User = Depe
 @router.websocket("/ws")
 async def event_websocket(websocket: WebSocket):
     # Authenticate WebSocket connections at the gateway or add token validation before production exposure.
+    redis_client = getattr(websocket.app.state, "redis", None)
+    if redis_client is None:
+        await websocket.close(code=1013, reason="Live notifications unavailable")
+        return
     await websocket.accept()
-    redis_client = websocket.app.state.redis
     pubsub = redis_client.pubsub()
     async def redis_to_websocket():
         async for message in pubsub.listen():

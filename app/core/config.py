@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "API Service"
     environment: str = "development"
+    auto_create_schema: bool = False
     log_level: str = "INFO"
     database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
