@@ -43,6 +43,13 @@ class Event(Base):
         nullable=False,
     )
 
+    # Event zone
+    zone: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
     message: Mapped[str] = mapped_column(
         Text,
         default="",

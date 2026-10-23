@@ -1,4 +1,3 @@
-
 import base64
 import binascii
 import io
@@ -71,6 +70,10 @@ def inspect_image(value: str | None) -> tuple[str, int] | None:
 class EventCreate(BaseModel):
     event_type: str = Field(min_length=1, max_length=100)
     camera_id: str = Field(min_length=1, max_length=100)
+
+    # Zone associated with the event
+    zone: str | None = Field(default=None, max_length=100)
+
     message: str = Field(default="", max_length=4000)
 
     severity: str = Field(
@@ -146,6 +149,10 @@ class EventUpdate(BaseModel):
     camera_id: str | None = Field(
         default=None, min_length=1, max_length=100
     )
+
+    # Zone can be updated independently
+    zone: str | None = Field(default=None, max_length=100)
+
     message: str | None = Field(default=None, max_length=4000)
 
     severity: str | None = Field(
@@ -211,6 +218,7 @@ class EventUpdate(BaseModel):
 
             if self.image_base64 is not None:
                 image_info = inspect_image(self.image_base64)
+
                 if self.image_mime_type != image_info[0]:
                     raise ValueError(
                         "image_mime_type does not match the actual image format"
@@ -226,6 +234,9 @@ class EventResponse(BaseModel):
     message: str
     severity: str
     status: str
+
+    # Zone included in event API responses
+    zone: str | None = None
 
     assigned_to: str | None = None
     assigned_by: int | None = None
