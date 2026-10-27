@@ -147,3 +147,31 @@ class Event(Base):
         index=True,
         nullable=False,
     )
+
+    # Resolution location
+    resolve_latitude: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    resolve_longitude: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    # Resolution message
+    resolve_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Resolution evidence image
+    resolve_image_base64: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    resolve_image_mime_type: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
