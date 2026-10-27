@@ -27,7 +27,7 @@ def inspect_image(value: str | None) -> tuple[str, int] | None:
     if value is None:
         return None
 
-    # Accept a raw Base64 string or a browser data URL.
+    # Accept raw Base64 or a browser data URL.
     if value.startswith("data:"):
         try:
             header, value = value.split(",", 1)
@@ -50,7 +50,6 @@ def inspect_image(value: str | None) -> tuple[str, int] | None:
 
     if not decoded:
         raise ValueError("Image cannot be empty")
-
     if len(decoded) > MAX_IMAGE_BYTES:
         raise ValueError("Image exceeds the 5 MB limit")
 
@@ -67,57 +66,46 @@ def inspect_image(value: str | None) -> tuple[str, int] | None:
     return SUPPORTED_IMAGE_TYPES[image_format], len(decoded)
 
 
+def normalize_base64_image(value: str | None) -> str | None:
+    """Validate image data and normalize data URLs to raw Base64."""
+    if value is None:
+        return None
+    if value.startswith("data:"):
+        try:
+            _, value = value.split(",", 1)
+        except ValueError as exc:
+            raise ValueError("Invalid image data URL") from exc
+    inspect_image(value)
+    return value
+
+
 class EventCreate(BaseModel):
     event_type: str = Field(min_length=1, max_length=100)
     camera_id: str = Field(min_length=1, max_length=100)
-
-    # Zone associated with the event
     zone: str | None = Field(default=None, max_length=100)
-
     message: str = Field(default="", max_length=4000)
-
-    severity: str = Field(
-        default="info",
-        pattern=r"^(info|warning|critical)$",
-    )
+    severity: str = Field(default="info", pattern=r"^(info|warning|critical)$")
     status: str = Field(
         default="pending",
         pattern=r"^(pending|assigned|acknowledged|resolved|closed)$",
     )
-
     assigned_to: str | None = Field(default=None, max_length=2000)
-
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-
     image_base64: str | None = None
     image_mime_type: str | None = Field(
-        default=None,
-        pattern=r"^image/(jpeg|png|webp)$",
+        default=None, pattern=r"^image/(jpeg|png|webp)$"
     )
 
     @field_validator("image_base64")
     @classmethod
     def validate_image_base64(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        # Normalize data URLs to raw Base64 before storing.
-        if value.startswith("data:"):
-            try:
-                _, value = value.split(",", 1)
-            except ValueError as exc:
-                raise ValueError("Invalid image data URL") from exc
-
-        inspect_image(value)
-        return value
+        return normalize_base64_image(value)
 
     @model_validator(mode="after")
     def validate_event_data(self):
         if (self.latitude is None) != (self.longitude is None):
-            raise ValueError(
-                "latitude and longitude must be provided together"
-            )
+            raise ValueError("latitude and longitude must be provided together")
 
         if self.image_base64 is None:
             if self.image_mime_type is not None:
@@ -131,64 +119,38 @@ class EventCreate(BaseModel):
                 "image_mime_type is required when an image is provided"
             )
 
-        image_info = inspect_image(self.image_base64)
-        actual_mime_type = image_info[0]
-
+        actual_mime_type = inspect_image(self.image_base64)[0]
         if self.image_mime_type != actual_mime_type:
             raise ValueError(
                 "image_mime_type does not match the actual image format"
             )
-
         return self
 
 
 class EventUpdate(BaseModel):
-    event_type: str | None = Field(
-        default=None, min_length=1, max_length=100
-    )
-    camera_id: str | None = Field(
-        default=None, min_length=1, max_length=100
-    )
-
-    # Zone can be updated independently
+    event_type: str | None = Field(default=None, min_length=1, max_length=100)
+    camera_id: str | None = Field(default=None, min_length=1, max_length=100)
     zone: str | None = Field(default=None, max_length=100)
-
     message: str | None = Field(default=None, max_length=4000)
-
     severity: str | None = Field(
-        default=None,
-        pattern=r"^(info|warning|critical)$",
+        default=None, pattern=r"^(info|warning|critical)$"
     )
     status: str | None = Field(
         default=None,
         pattern=r"^(pending|assigned|acknowledged|resolved|closed)$",
     )
-
     assigned_to: str | None = Field(default=None, max_length=2000)
-
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-
     image_base64: str | None = None
     image_mime_type: str | None = Field(
-        default=None,
-        pattern=r"^image/(jpeg|png|webp)$",
+        default=None, pattern=r"^image/(jpeg|png|webp)$"
     )
 
     @field_validator("image_base64")
     @classmethod
     def validate_image_base64(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-
-        if value.startswith("data:"):
-            try:
-                _, value = value.split(",", 1)
-            except ValueError as exc:
-                raise ValueError("Invalid image data URL") from exc
-
-        inspect_image(value)
-        return value
+        return normalize_base64_image(value)
 
     @model_validator(mode="after")
     def validate_update(self):
@@ -197,11 +159,8 @@ class EventUpdate(BaseModel):
             and "longitude" in self.model_fields_set
             and (self.latitude is None) != (self.longitude is None)
         ):
-            raise ValueError(
-                "latitude and longitude must be provided together"
-            )
+            raise ValueError("latitude and longitude must be provided together")
 
-        # Validate image consistency when both image fields are supplied.
         if (
             "image_base64" in self.model_fields_set
             and "image_mime_type" in self.model_fields_set
@@ -210,20 +169,16 @@ class EventUpdate(BaseModel):
                 raise ValueError(
                     "image_base64 is required when image_mime_type is provided"
                 )
-
             if self.image_base64 is not None and self.image_mime_type is None:
                 raise ValueError(
                     "image_mime_type is required when an image is provided"
                 )
-
             if self.image_base64 is not None:
-                image_info = inspect_image(self.image_base64)
-
-                if self.image_mime_type != image_info[0]:
+                actual_mime_type = inspect_image(self.image_base64)[0]
+                if self.image_mime_type != actual_mime_type:
                     raise ValueError(
                         "image_mime_type does not match the actual image format"
                     )
-
         return self
 
 
@@ -234,8 +189,6 @@ class EventResponse(BaseModel):
     message: str
     severity: str
     status: str
-
-    # Zone included in event API responses
     zone: str | None = None
 
     assigned_to: str | None = None
@@ -249,12 +202,17 @@ class EventResponse(BaseModel):
     resolved_at: datetime | None = None
     resolution_notes: str | None = None
 
+    resolve_latitude: float | None = None
+    resolve_longitude: float | None = None
+    resolve_message: str | None = None
+    resolve_image_base64: str | None = None
+    resolve_image_mime_type: str | None = None
+
     latitude: float | None = None
     longitude: float | None = None
 
     image_base64: str | None = None
     image_mime_type: str | None = None
-
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -262,6 +220,39 @@ class EventResponse(BaseModel):
 
 class ResolveRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
+    resolve_latitude: float = Field(ge=-90, le=90)
+    resolve_longitude: float = Field(ge=-180, le=180)
+    resolve_message: str = Field(min_length=1, max_length=4000)
+    resolve_image_base64: str | None = None
+    resolve_image_mime_type: str | None = Field(
+        default=None, pattern=r"^image/(jpeg|png|webp)$"
+    )
+
+    @field_validator("resolve_image_base64")
+    @classmethod
+    def validate_resolve_image_base64(cls, value: str | None) -> str | None:
+        return normalize_base64_image(value)
+
+    @model_validator(mode="after")
+    def validate_resolution_image(self):
+        if self.resolve_image_base64 is None:
+            if self.resolve_image_mime_type is not None:
+                raise ValueError(
+                    "resolve_image_base64 is required when resolve_image_mime_type is provided"
+                )
+            return self
+
+        if self.resolve_image_mime_type is None:
+            raise ValueError(
+                "resolve_image_mime_type is required when resolution evidence is provided"
+            )
+
+        actual_mime_type = inspect_image(self.resolve_image_base64)[0]
+        if self.resolve_image_mime_type != actual_mime_type:
+            raise ValueError(
+                "resolve_image_mime_type does not match the actual image format"
+            )
+        return self
 
 
 class AssignRequest(BaseModel):

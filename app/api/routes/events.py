@@ -1,6 +1,7 @@
 
 import asyncio
 import json
+import math
 from datetime import datetime, timezone
 
 import anyio
@@ -42,7 +43,7 @@ def publish_event(request: Request, event: Event) -> None:
 
         data = EventResponse.model_validate(event).model_dump(
             mode="json",
-            exclude={"image_base64"},
+            exclude={"image_base64", "resolve_image_base64"},
         )
 
         # This route uses synchronous SQLAlchemy endpoints. Run an async
@@ -226,7 +227,7 @@ def list_events(
     items = [
         EventResponse.model_validate(event).model_dump(
             mode="json",
-            exclude={"image_base64"},
+            exclude={"image_base64", "resolve_image_base64"},
         )
         for event in rows
     ]
@@ -347,6 +348,30 @@ def acknowledge_event(
     return event
 
 
+def haversine_distance_meters(
+    lat1: float,
+    lon1: float,
+    lat2: float,
+    lon2: float,
+) -> float:
+    """Calculate great-circle distance between two GPS points in meters."""
+    earth_radius_m = 6_371_000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2)
+        * math.sin(delta_lambda / 2) ** 2
+    )
+    a = min(1.0, max(0.0, a))
+    return 2 * earth_radius_m * math.atan2(
+        math.sqrt(a), math.sqrt(1.0 - a)
+    )
+
+
 @router.patch("/{event_id}/resolve", response_model=EventResponse)
 def resolve_event(
     event_id: int,
@@ -365,13 +390,89 @@ def resolve_event(
             detail="Closed events cannot be resolved again",
         )
 
+    if payload.resolve_latitude is None or payload.resolve_longitude is None:
+        raise HTTPException(
+            status_code=422,
+            detail="resolve_latitude and resolve_longitude are required",
+        )
+
+    if not payload.resolve_message or not payload.resolve_message.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="resolve_message is required",
+        )
+
+    # Validate the optional evidence image and MIME type.
+    if payload.resolve_image_base64 is None:
+        if payload.resolve_image_mime_type is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="resolve_image_mime_type requires resolve_image_base64",
+            )
+        evidence_mime_type = None
+    else:
+        if payload.resolve_image_mime_type is None:
+            raise HTTPException(
+                status_code=422,
+                detail="resolve_image_mime_type is required when evidence image is provided",
+            )
+        try:
+            image_info = inspect_image(payload.resolve_image_base64)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        if image_info is None or image_info[0] != payload.resolve_image_mime_type:
+            raise HTTPException(
+                status_code=422,
+                detail="resolve_image_mime_type does not match the actual image format",
+            )
+        evidence_mime_type = image_info[0]
+
+    # The original event must have coordinates to compare against.
+    if event.latitude is None or event.longitude is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot validate resolution distance because the event "
+                "does not have latitude and longitude"
+            ),
+        )
+
+    distance_meters = haversine_distance_meters(
+        event.latitude,
+        event.longitude,
+        payload.resolve_latitude,
+        payload.resolve_longitude,
+    )
+    max_resolution_distance_meters = 50.0
+
+    if distance_meters > max_resolution_distance_meters:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Resolution location is too far from the event location",
+                "distance_meters": round(distance_meters, 2),
+                "maximum_allowed_distance_meters": max_resolution_distance_meters,
+            },
+        )
+
     event.status = "resolved"
     event.resolved_by = user.id
     event.resolved_at = datetime.now(timezone.utc)
     event.resolution_notes = payload.notes
+    event.resolve_latitude = payload.resolve_latitude
+    event.resolve_longitude = payload.resolve_longitude
+    event.resolve_message = payload.resolve_message.strip()
+    event.resolve_image_base64 = payload.resolve_image_base64
+    event.resolve_image_mime_type = evidence_mime_type
 
-    db.commit()
-    db.refresh(event)
+    try:
+        db.commit()
+        db.refresh(event)
+    except Exception:
+        db.rollback()
+        raise
+
     publish_event(request, event)
     return event
 
