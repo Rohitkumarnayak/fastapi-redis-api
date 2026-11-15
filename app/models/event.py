@@ -59,14 +59,14 @@ class Event(Base):
     # Severity and workflow status
     severity: Mapped[str] = mapped_column(
         String(20),
-        default="info",
+        default="Low",
         index=True,
         nullable=False,
     )
 
     status: Mapped[str] = mapped_column(
         String(30),
-        default="pending",
+        default="New",
         index=True,
         nullable=False,
     )

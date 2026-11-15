@@ -332,11 +332,11 @@ def acknowledge_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    if event.status in {"resolved", "closed"}:
-        raise HTTPException(
-            status_code=409,
-            detail="Resolved/closed events cannot be acknowledged",
-        )
+    # if event.status in {"resolved", "closed"}:
+    #     raise HTTPException(
+    #         status_code=409,
+    #         detail="Resolved/closed events cannot be acknowledged",
+    #     )
 
     event.status = "acknowledged"
     event.acknowledged_by = user.id

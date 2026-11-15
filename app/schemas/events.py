@@ -84,7 +84,7 @@ class EventCreate(BaseModel):
     camera_id: str = Field(min_length=1, max_length=100)
     zone: str | None = Field(default=None, max_length=100)
     message: str = Field(default="", max_length=4000)
-    severity: str = Field(default="info", pattern=r"^(info|warning|critical)$")
+    severity: str = Field(default="Low", pattern=r"^(Low|Medium|High)$")
     status: str = Field(
         default="pending",
         pattern=r"^(pending|assigned|acknowledged|resolved|closed)$",
@@ -133,7 +133,7 @@ class EventUpdate(BaseModel):
     zone: str | None = Field(default=None, max_length=100)
     message: str | None = Field(default=None, max_length=4000)
     severity: str | None = Field(
-        default=None, pattern=r"^(info|warning|critical)$"
+        default=None, pattern=r"^(Low|Medium|High)$"
     )
     status: str | None = Field(
         default=None,

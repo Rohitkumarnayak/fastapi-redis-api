@@ -4,12 +4,13 @@ import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
-from app.api.routes import auth, cache, dashboard, events, health, users, devices, zones, reports
+from app.api.routes import auth, cache, dashboard, events, health, users, devices, zones, reports, email
 from app.core.config import settings
 from app.database.connection import Base, engine, SessionLocal
 from app.models import Event, LoginSession, User  # noqa: F401 - register ORM models
 from app.core.security import hash_password
 from sqlalchemy import select
+
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -83,7 +84,64 @@ app.include_router(devices.router, prefix="/api/v1")
 app.include_router(zones.router, prefix="/api/v1")
 app.include_router(reports.router, prefix="/api/v1")
 app.include_router(cache.router, prefix="/api/v1")
+app.include_router(email.router,prefix="/api/v1")
 
 @app.get("/", tags=["root"])
 async def root():
     return {"message": "API is running", "docs": "/docs", "health": "/api/v1/health", "readiness": "/api/v1/health/ready"}
+
+from fastapi.openapi.utils import get_openapi
+
+
+def custom_openapi():
+
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        openapi_version="3.0.3"
+    )
+
+    # Locate Email API schema
+    email_path = "/api/v1/email/send"
+
+    if email_path in openapi_schema["paths"]:
+
+        request_body = (
+            openapi_schema["paths"][email_path]
+            ["post"]["requestBody"]
+        )
+
+        schema_ref = (
+            request_body["content"]["multipart/form-data"]["schema"]
+        )
+
+        if "$ref" in schema_ref:
+
+            schema_name = schema_ref["$ref"].split("/")[-1]
+
+            body_schema = (
+                openapi_schema["components"]["schemas"][schema_name]
+            )
+
+            files_schema = (
+                body_schema["properties"].get("files")
+            )
+
+            if files_schema:
+
+                files_schema["items"] = {
+                    "type": "string",
+                    "format": "binary"
+                }
+
+    app.openapi_schema = openapi_schema
+
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi

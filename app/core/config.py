@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
+    smtp_host: str = "smtp.hostinger.com"
+    smtp_port: int = 465
+
+    smtp_username: str = ""
+    smtp_password: str = ""
+
+    smtp_from_email: str = ""
+    smtp_from_name: str = "HENXS Notification System"
+
+    smtp_use_tls: bool = True
 
 
 settings = Settings()
