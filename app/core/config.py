@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     session_hours: int = 12
+    vehicle_offline_after_seconds: int = 300
+    vehicle_monitor_interval_seconds: int = 30
     # Set these before running scripts/create_admin.py. Never commit real values.
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""

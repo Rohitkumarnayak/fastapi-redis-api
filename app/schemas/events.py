@@ -80,6 +80,7 @@ def normalize_base64_image(value: str | None) -> str | None:
 
 
 class EventCreate(BaseModel):
+    object_count: int = Field(default=1, ge=0, le=1000000)
     event_type: str = Field(min_length=1, max_length=100)
     camera_id: str = Field(min_length=1, max_length=100)
     zone: str | None = Field(default=None, max_length=100)
@@ -128,6 +129,7 @@ class EventCreate(BaseModel):
 
 
 class EventUpdate(BaseModel):
+    object_count: int | None = Field(default=None, ge=0, le=1000000)
     event_type: str | None = Field(default=None, min_length=1, max_length=100)
     camera_id: str | None = Field(default=None, min_length=1, max_length=100)
     zone: str | None = Field(default=None, max_length=100)
@@ -184,6 +186,7 @@ class EventUpdate(BaseModel):
 
 class EventResponse(BaseModel):
     id: int
+    object_count: int = 1
     event_type: str
     camera_id: str
     message: str

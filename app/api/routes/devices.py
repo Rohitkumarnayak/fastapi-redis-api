@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, ConfigDict
-from sqlalchemy import or_, select, func
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from email_validator import validate_email, EmailNotValidError
+from sqlalchemy import or_, select, func, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.routes.auth import get_current_user, require_admin
 from app.database.connection import get_db
-from app.models import Device, User
+from app.models import Device, User, VehicleJourneyReport
 
 router = APIRouter(prefix="/devices", tags=["device management"])
 
@@ -21,6 +22,8 @@ class DeviceCreate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     status: str = Field(default="inactive", pattern=r"^(active|inactive|offline|maintenance)$")
     enabled: bool = True
+    email_recipients: list[str] | None = None
+    email_notifications_enabled: bool = False
     metadata_json: dict | None = Field(default=None, alias="metadata")
     model_config = {"populate_by_name": True}
 
@@ -34,13 +37,16 @@ class DeviceUpdate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     status: str | None = Field(default=None, pattern=r"^(active|inactive|offline|maintenance)$")
     enabled: bool | None = None
+    email_recipients: list[str] | None = None
+    email_notifications_enabled: bool | None = None
     metadata_json: dict | None = Field(default=None, alias="metadata")
     model_config = {"populate_by_name": True}
 
 class DeviceOut(BaseModel):
     id: int; device_id: str; name: str; device_type: str; ip_address: str | None
     stream_url: str | None; location: str | None; latitude: float | None; longitude: float | None
-    status: str; enabled: bool; metadata_json: dict | None = Field(serialization_alias="metadata")
+    status: str; enabled: bool; last_online_at: datetime | None; last_offline_at: datetime | None
+    email_recipients: list[str] | None; email_notifications_enabled: bool; metadata_json: dict | None = Field(serialization_alias="metadata")
     created_at: datetime; last_seen_at: datetime | None; updated_at: datetime
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -77,7 +83,10 @@ def get_device(device_id: str, db: Session = Depends(get_db), _: User = Depends(
 def device_heartbeat(device_id: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     device = db.scalar(select(Device).where(Device.device_id == device_id))
     if not device: raise HTTPException(404, "Device not found")
-    device.last_seen_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if device.status.lower() != "active" or device.last_online_at is None:
+        device.last_online_at = now
+    device.last_seen_at = now
     device.status = "active"
     db.commit(); db.refresh(device)
     return device
@@ -98,3 +107,54 @@ def disable_device(device_id: str, db: Session = Depends(get_db), _: User = Depe
     if not device: raise HTTPException(404, "Device not found")
     device.enabled = False; device.status = "inactive"; db.commit()
     return {"success": True, "message": "Device disabled", "device_id": device_id}
+
+
+@router.get("/{device_id}/journey-reports")
+def list_vehicle_journey_reports(
+    device_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    device = db.scalar(select(Device).where(Device.device_id == device_id))
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    query = select(VehicleJourneyReport).where(
+        VehicleJourneyReport.device_id == device_id
+    )
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = db.scalars(
+        query.order_by(desc(VehicleJourneyReport.offline_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "device_id": row.device_id,
+                "device_name": row.device_name,
+                "online_at": row.online_at,
+                "offline_at": row.offline_at,
+                "duration_seconds": row.duration_seconds,
+                "total_detections": row.total_detections,
+                "total_events": row.total_events,
+                "assigned_events": row.assigned_events,
+                "acknowledged_events": row.acknowledged_events,
+                "resolved_events": row.resolved_events,
+                "event_breakdown": row.event_breakdown or {},
+                "recipients": row.recipients or [],
+                "email_sent": row.email_sent,
+                "email_error": row.email_error,
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ],
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "pages": (total + page_size - 1) // page_size,
+    }

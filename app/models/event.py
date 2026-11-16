@@ -8,6 +8,7 @@ from sqlalchemy import (
     String,
     Text,
     Float,
+    Integer,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +31,8 @@ class Event(Base):
         primary_key=True,
         index=True,
     )
+
+    object_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     event_type: Mapped[str] = mapped_column(
         String(100),

@@ -129,3 +129,55 @@ All protected routes require `Authorization: Bearer <access_token>`. Roles curre
 - Event Pub/Sub is best-effort; event rows are committed to PostgreSQL first.
 - `assigned_to` is a single free-text field by design. For reliable structured reporting on contact name/phone, separate columns would be better, but this implementation preserves the requested one-field model.
 - Add rate limiting, audit logs, backup/restore testing, and automated integration tests against a non-production Neon branch before production rollout.
+
+
+## Vehicle online/offline monitoring and journey reports
+
+The API starts a background worker during FastAPI lifespan. It checks registered
+`devices` whose `device_type` is `vehicle` every `VEHICLE_MONITOR_INTERVAL_SECONDS`
+(default 30 seconds). A vehicle is marked offline when its last heartbeat is at
+least `VEHICLE_OFFLINE_AFTER_SECONDS` old (default 300 seconds / 5 minutes).
+
+For an existing production database, apply
+`migrations/20261116_vehicle_monitoring.sql` once before deploying this version.
+Do not rely on `AUTO_CREATE_SCHEMA` for altering existing tables.
+
+Vehicle devices must be registered with `device_type: "vehicle"`. The vehicle
+must call `POST /api/v1/devices/{device_id}/heartbeat` regularly. The heartbeat
+sets `last_seen_at`, marks the vehicle active, and sets `last_online_at` when a
+new online period starts. When the monitor marks it offline, it sets
+`last_offline_at` and saves a historical row in `vehicle_journey_reports`.
+
+Configure notification recipients and the mail toggle using the admin-only
+`PATCH /api/v1/devices/{device_id}` endpoint:
+
+```json
+{
+  "email_recipients": ["ops@example.com", "safety@example.com"],
+  "email_notifications_enabled": true
+}
+```
+
+Set `email_notifications_enabled` to `false` to keep generating reports without
+sending email. The SMTP settings already used by `/api/v1/email/send` are reused.
+Journey reports can be retrieved using
+`GET /api/v1/devices/{device_id}/journey-reports`.
+
+Each event now accepts `object_count` (default 1). `total_detections` is the sum
+of `object_count` across that vehicle's events during the journey. Existing
+events are migrated with `object_count = 1`; if your event producer sends one
+row per event containing multiple detected objects, update it to send the
+actual count. Events are associated with a vehicle when `events.camera_id`
+equals `devices.device_id`.
+
+Environment overrides:
+
+```env
+VEHICLE_OFFLINE_AFTER_SECONDS=300
+VEHICLE_MONITOR_INTERVAL_SECONDS=30
+```
+
+For multi-process deployments, the worker uses PostgreSQL row locks with
+`SKIP LOCKED` so a stale vehicle is transitioned and reported by only one
+worker at a time. Keep the API deployment connected to the same PostgreSQL
+database.

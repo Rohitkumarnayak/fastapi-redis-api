@@ -7,7 +7,8 @@ from redis.asyncio import Redis
 from app.api.routes import auth, cache, dashboard, events, health, users, devices, zones, reports, email
 from app.core.config import settings
 from app.database.connection import Base, engine, SessionLocal
-from app.models import Event, LoginSession, User  # noqa: F401 - register ORM models
+from app.models import Event, LoginSession, User, Device, VehicleJourneyReport  # noqa: F401 - register ORM models
+from app.services.vehicle_monitor import vehicle_monitor
 from app.core.security import hash_password
 from sqlalchemy import select
 
@@ -67,7 +68,9 @@ async def lifespan(app: FastAPI):
         app.state.redis_available = False
         await redis_client.aclose()
         app.state.redis = None
+    vehicle_monitor.start()
     yield
+    vehicle_monitor.stop()
     if app.state.redis is not None:
         await app.state.redis.aclose()
     engine.dispose()
